@@ -174,3 +174,6 @@ Later after closing the container you may re-open it by name to continue where y
 ```bash
 docker start -i nrfconnect-sdk
 ```
+
+# Example run on .devcontainer workspace
+west build -p always -b nrf9160dk_nrf9160_ns --build-dir ./build  /workdir/nrf/applications/asset_tracker_v2

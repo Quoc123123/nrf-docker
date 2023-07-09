@@ -176,4 +176,4 @@ docker start -i nrfconnect-sdk
 ```
 
 # Example run on .devcontainer workspace
-west build -p always -b nrf9160dk_nrf9160_ns --build-dir ./build  /workdir/nrf/applications/asset_tracker_v2
+west build -p always -b nrf9160dk_nrf52840 --build-dir ./build  /workdir/nrf/samples/bluetooth/throughput

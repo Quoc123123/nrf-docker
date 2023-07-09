@@ -1,4 +1,5 @@
-FROM ubuntu:22.04 as base
+FROM 19861975/env-cmake-sw-dev:latest as base
+
 WORKDIR /workdir
 
 ARG arch=amd64

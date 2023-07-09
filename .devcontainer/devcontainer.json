@@ -8,7 +8,8 @@
     "dockerFile": "nrf-sdk/Dockerfile",
     "build": {
         "args": {
-            "USERNAME": "${localEnv:USER}"
+            "USERNAME": "${localEnv:USER}",
+            "sdk_nrf_revision": "v2.0.2"
         }
     },
     // Set *default* container specific settings.json values on container create.

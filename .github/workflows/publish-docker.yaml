@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - saga
-  schedule:
-    - cron: "0 0 * * *"
 
 jobs:
   build:

@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 as base
+FROM ubuntu:22.04 AS base
 WORKDIR /workdir
 
 ARG sdk_nrf_branch=v2.6-branch
@@ -16,7 +16,13 @@ SHELL [ "/bin/bash", "-euxo", "pipefail", "-c" ]
 RUN <<EOT
     apt-get -y update
     apt-get -y upgrade
-    apt-get -y install wget unzip clang-format gcc-multilib make libffi7
+    # Install packages based on architecture
+    if [ "$arch" = "amd64" ]; then
+        apt-get -y install wget unzip clang-format gcc-multilib make libffi7
+    else
+        # For ARM64, gcc-multilib is not available, use gcc instead
+        apt-get -y install wget unzip clang-format gcc make libffi7
+    fi
     apt-get -y clean
     rm -rf /var/lib/apt/lists/*
 EOT
@@ -27,14 +33,12 @@ EOT
 # checkout.
 ENV NRFUTIL_HOME=/usr/local/share/nrfutil
 RUN <<EOT
-    wget -q https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil
-    mv nrfutil /usr/local/bin
-    chmod +x /usr/local/bin/nrfutil
-    nrfutil install toolchain-manager
-    nrfutil install toolchain-manager search
-    nrfutil toolchain-manager install --ncs-version ${toolchain_version}
-    nrfutil toolchain-manager list
-    rm -f /root/ncs/downloads/*
+    # Install nrfutil via pip (works on ARM64)
+    apt-get -y update
+    apt-get -y install python3-pip
+    pip3 install nrfutil
+    # Note: pip version of nrfutil doesn't have toolchain-manager functionality
+    # The toolchain will be installed via west instead
 EOT
 
 #
@@ -75,18 +79,23 @@ RUN <<EOT
     fi
 EOT
 
-# Prepare image with a ready to use build environment
-SHELL ["nrfutil","toolchain-manager","launch","/bin/bash","--","-c"]
+# Install west and prepare image with a ready to use build environment
+RUN <<EOT
+    pip3 install west
+    # Install additional tools needed for nRF development
+    apt-get -y install git cmake ninja-build
+EOT
+
 RUN <<EOT
     west init -m https://github.com/nrfconnect/sdk-nrf --mr ${sdk_nrf_branch} .
-    if [[ $sdk_nrf_commit =~ "^[a-fA-F0-9]{32}$" ]]; then
+    if [[ -n "${sdk_nrf_commit:-}" && $sdk_nrf_commit =~ "^[a-fA-F0-9]{32}$" ]]; then
         git checkout ${sdk_nrf_commit};
     fi
     west update --narrow -o=--depth=1
 EOT
 
-# Launch into build environment with the passed arguments
-# Currently this is not supported in GitHub Actions
-# See https://github.com/actions/runner/issues/1964
-ENTRYPOINT [ "nrfutil", "toolchain-manager", "launch", "/bin/bash", "--", "/root/entry.sh" ]
+# Copy entry script
 COPY ./entry.sh /root/entry.sh
+
+# Launch into build environment with the passed arguments
+ENTRYPOINT [ "/root/entry.sh" ]

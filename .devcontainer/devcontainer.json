@@ -8,8 +8,7 @@
     "dockerFile": "nrf-sdk/Dockerfile",
     "build": {
         "args": {
-            "USERNAME": "${localEnv:USER}",
-            "sdk_nrf_revision": "v2.0.2"
+            "USERNAME": "root"  // If this doesn't work use your username here eg: fickles
         }
     },
     // Set *default* container specific settings.json values on container create.
@@ -24,8 +23,9 @@
         "twxs.cmake",
         "xaver.clang-format",
         "eamodio.gitlens",
+        "mhutchie.git-graph",
         "matepek.vscode-catch2-test-adapter",
-        "hbenl.vscode-test-explorer"
+        "hbenl.vscode-test-explorer",
     ],
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
     // "forwardPorts": [],
@@ -37,11 +37,11 @@
     ],
     "containerEnv": {},
     // Uncomment to use the Docker CLI from inside the container. See https://aka.ms/vscode-remote/samples/docker-from-docker.
-    "mounts": [
-        "type=bind,source=/dev/bus/usb,target=/dev/bus/usb",
-        "type=bind,source=/dev/ttyUSB0,target=/dev/ttyUSB0"
-    ],
+    // "mounts": [
+    //     "type=bind,source=/dev/bus/usb,target=/dev/bus/usb",
+    //     "type=bind,source=/dev/ttyUSB0,target=/dev/ttyUSB0"
+    // ],
     // "mounts": [ "source=/dev,target=/dev,type=volume" ],
     // Connect as a non-root user: See https://aka.ms/vscode-remote/containers/non-root.
-    "remoteUser": "${localEnv:USER}"
+    "remoteUser": "root"
 }

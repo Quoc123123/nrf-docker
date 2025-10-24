@@ -1,163 +1,92 @@
-FROM 19861975/env-cmake-sw-dev:latest as base
-
+FROM ubuntu:22.04 as base
 WORKDIR /workdir
 
+ARG sdk_nrf_branch=v2.6-branch
+ARG toolchain_version=v2.6.0
+ARG sdk_nrf_commit
+ARG NORDIC_COMMAND_LINE_TOOLS_VERSION="10-24-0/nrf-command-line-tools-10.24.0"
 ARG arch=amd64
-ARG crossarch=arm-zephyr-eabi
-ARG ZEPHYR_TOOLCHAIN_VERSION=0.15.2
-ARG WEST_VERSION=0.14.0
-ARG NRF_UTIL_VERSION=6.1.7
-ARG NORDIC_COMMAND_LINE_TOOLS_VERSION="10-18-1/nrf-command-line-tools-10.18.1"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# System dependencies
-RUN mkdir /workdir/.cache && \
-    apt-get -y update && \
-    apt-get -y upgrade && \
-    apt-get -y install \
-        wget \
-        python3-pip \
-        python3-venv \
-        ninja-build \
-        gperf \
-        git \
-        unzip \
-        libncurses5 libncurses5-dev \
-        libyaml-dev libfdt1 \
-        libusb-1.0-0-dev udev \
-        device-tree-compiler \
-        xz-utils \
-        file \
-        ruby && \
-    apt-get -y clean && apt-get -y autoremove && \
-    #
-    # Latest PIP & Python dependencies
-    #
-    python3 -m pip install -U pip && \
-    python3 -m pip install -U pipx && \
-    python3 -m pip install -U setuptools && \
-    python3 -m pip install 'cmake>=3.20.0' wheel && \
-    python3 -m pip install -U "west==${WEST_VERSION}" && \
-    python3 -m pip install pc_ble_driver_py && \
-    # Newer PIP will not overwrite distutils, so upgrade PyYAML manually
-    python3 -m pip install --ignore-installed -U PyYAML && \
-    #
-    # Isolated command line tools
-    # No nrfutil 6+ release for arm64 (M1/M2 Macs) and Python 3, yet: https://github.com/NordicSemiconductor/pc-ble-driver-py/issues/227
-    #
-    case $arch in \
-    "amd64") \
-        PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-        pipx install "nrfutil==${NRF_UTIL_VERSION}" \
-        ;; \
-    esac && \
-    #
-    # ClangFormat
-    #
-    python3 -m pip install -U six && \
-    apt-get -y install clang-format && \
-    wget -qO- https://raw.githubusercontent.com/nrfconnect/sdk-nrf/main/.clang-format > /workdir/.clang-format && \
-    #
-    # Nordic command line tools
-    # Releases: https://www.nordicsemi.com/Products/Development-tools/nrf-command-line-tools/download
-    #
-    NCLT_BASE=https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x && \
-    echo "Host architecture: $arch" && \
-    case $arch in \
-        "amd64") \
-            NCLT_URL="${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-amd64.tar.gz" \
-            ;; \
-        "arm64") \
-            NCLT_URL="${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-arm64.tar.gz" \
-            ;; \
-    esac && \
-    echo "NCLT_URL=${NCLT_URL}" && \
-    # Releases: https://www.nordicsemi.com/Software-and-tools/Development-Tools/nRF-Command-Line-Tools/Download
-    if [ ! -z "$NCLT_URL" ]; then \
-        mkdir tmp && cd tmp && \
-        wget -qO - "${NCLT_URL}" | tar --no-same-owner -xz && \
+SHELL [ "/bin/bash", "-euxo", "pipefail", "-c" ]
+
+# gcc-multilib make = Host tools for native_sim build
+# python 3.8 is installed by toolchain manager hence older version of libffi is required
+RUN <<EOT
+    apt-get -y update
+    apt-get -y upgrade
+    apt-get -y install wget unzip clang-format gcc-multilib make libffi7
+    apt-get -y clean
+    rm -rf /var/lib/apt/lists/*
+EOT
+
+# Install toolchain
+# Make nrfutil install in a shared location, because when used with GitHub
+# Actions, the image will be launched with the home dir mounted from the local
+# checkout.
+ENV NRFUTIL_HOME=/usr/local/share/nrfutil
+RUN <<EOT
+    wget -q https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil
+    mv nrfutil /usr/local/bin
+    chmod +x /usr/local/bin/nrfutil
+    nrfutil install toolchain-manager
+    nrfutil install toolchain-manager search
+    nrfutil toolchain-manager install --ncs-version ${toolchain_version}
+    nrfutil toolchain-manager list
+    rm -f /root/ncs/downloads/*
+EOT
+
+#
+# ClangFormat
+#
+RUN <<EOT
+    wget -qO- https://raw.githubusercontent.com/nrfconnect/sdk-nrf/${sdk_nrf_branch}/.clang-format > /workdir/.clang-format
+EOT
+
+# Nordic command line tools
+# Releases: https://www.nordicsemi.com/Products/Development-tools/nrf-command-line-tools/download
+RUN <<EOT
+    NCLT_BASE=https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x
+    echo "Host architecture: $arch"
+    case $arch in
+        "amd64")
+            NCLT_URL="${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-amd64.tar.gz"
+            ;;
+        "arm64")
+            NCLT_URL="${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-arm64.tar.gz"
+            ;;
+    esac
+    echo "NCLT_URL=${NCLT_URL}"
+    if [ ! -z "$NCLT_URL" ]; then
+        mkdir tmp && cd tmp
+        wget -qO - "${NCLT_URL}" | tar --no-same-owner -xz
         # Install included JLink
-        DEBIAN_FRONTEND=noninteractive apt-get -y install ./*.deb && \
+        mkdir /opt/SEGGER
+        tar xzf JLink_*.tgz -C /opt/SEGGER
+        mv /opt/SEGGER/JLink* /opt/SEGGER/JLink
         # Install nrf-command-line-tools
-        cp -r ./nrf-command-line-tools /opt && \
-        ln -s /opt/nrf-command-line-tools/bin/nrfjprog /usr/local/bin/nrfjprog && \
-        ln -s /opt/nrf-command-line-tools/bin/mergehex /usr/local/bin/mergehex && \
-        cd .. && rm -rf tmp ; \
-    else \
-        echo "Skipping nRF Command Line Tools (not available for $arch)" ; \
-    fi && \
-    #
-    # Zephyr Toolchain
-    # Releases: https://github.com/zephyrproject-rtos/sdk-ng/releases
-    #
-    echo "Host architecture: ${arch}" && \
-    echo "Target architecture: ${crossarch}" && \
-    echo "Zephyr Toolchain version: ${ZEPHYR_TOOLCHAIN_VERSION}" && \
-    case $arch in \
-        "amd64") \
-            ZEPHYR_MINIMAL_BUNDLE_URL="https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_TOOLCHAIN_VERSION}/zephyr-sdk-${ZEPHYR_TOOLCHAIN_VERSION}_linux-x86_64_minimal.tar.gz" \
-            ;; \
-        "arm64") \
-            ZEPHYR_MINIMAL_BUNDLE_URL="https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_TOOLCHAIN_VERSION}/zephyr-sdk-${ZEPHYR_TOOLCHAIN_VERSION}_macos-aarch64_minimal.tar.gz" \
-            ;; \
-        *) \
-            echo "Unsupported host architecture: \"${arch}\"" >&2 && \
-            exit 1 ;; \
-    esac && \
-    echo "Install Zephyr SDK from ZEPHYR_MINIMAL_BUNDLE_URL=${ZEPHYR_MINIMAL_BUNDLE_URL}" && \
-    wget -qO - "${ZEPHYR_MINIMAL_BUNDLE_URL}" | tar xz && \
-    mv /workdir/zephyr-sdk-${ZEPHYR_TOOLCHAIN_VERSION} /workdir/zephyr-sdk && cd /workdir/zephyr-sdk && \
-    case $arch in \
-        "arm64") \
-            ./setup.sh -t aarch64-zephyr-elf -c \
-            ;; \
-        *) \
-            yes | ./setup.sh -t ${crossarch} \
-            ;; \
-    esac && \
-    #
-    # Install Python 3.8 for older toolchain versions
-    #
-    if [ $(expr match "$ZEPHYR_TOOLCHAIN_VERSION" "0\.14\.*") -ne 0 ]; then \
-        apt-get -y install software-properties-common && \
-        add-apt-repository -y ppa:deadsnakes/ppa && \
-        apt-get -y update && \
-        apt-get -y install python3.8 python3.8-dev && \
-        python3.8 --version; \
+        cp -r ./nrf-command-line-tools /opt
+        ln -s /opt/nrf-command-line-tools/bin/nrfjprog /usr/local/bin/nrfjprog
+        ln -s /opt/nrf-command-line-tools/bin/mergehex /usr/local/bin/mergehex
+        cd .. && rm -rf tmp ;
+    else
+        echo "Skipping nRF Command Line Tools (not available for $arch)" ;
     fi
+EOT
 
-# Download sdk-nrf and west dependencies to install pip requirements
-FROM base
-ARG sdk_nrf_revision=main
-RUN \
-    west init -m https://github.com/nrfconnect/sdk-nrf --mr ${sdk_nrf_revision} && \
-    west update --narrow -o=--depth=1 && \
-    echo "Installing requirements: zephyr/scripts/requirements.txt" && \
-    python3 -m pip install -r zephyr/scripts/requirements.txt && \
-    case $sdk_nrf_revision in \
-        "v1.4-branch") \
-            echo "Installing requirements: nrf/scripts/requirements.txt" && \
-            python3 -m pip install -r nrf/scripts/requirements.txt \
-        ;; \
-        *) \
-            # Install only the requirements needed for building firmware, not documentation
-            echo "Installing requirements: nrf/scripts/requirements-base.txt" && \
-            python3 -m pip install -r nrf/scripts/requirements-base.txt && \
-            echo "Installing requirements: nrf/scripts/requirements-build.txt" && \
-            python3 -m pip install -r nrf/scripts/requirements-build.txt \
-        ;; \
-    esac && \
-    echo "Installing requirements: bootloader/mcuboot/scripts/requirements.txt" && \
-    python3 -m pip install -r bootloader/mcuboot/scripts/requirements.txt
+# Prepare image with a ready to use build environment
+SHELL ["nrfutil","toolchain-manager","launch","/bin/bash","--","-c"]
+RUN <<EOT
+    west init -m https://github.com/nrfconnect/sdk-nrf --mr ${sdk_nrf_branch} .
+    if [[ $sdk_nrf_commit =~ "^[a-fA-F0-9]{32}$" ]]; then
+        git checkout ${sdk_nrf_commit};
+    fi
+    west update --narrow -o=--depth=1
+EOT
 
-RUN mkdir /workdir/project
-
-WORKDIR /workdir/project
-ENV LC_ALL=C.UTF-8
-ENV LANG=C.UTF-8
-ENV XDG_CACHE_HOME=/workdir/.cache
-ENV ZEPHYR_TOOLCHAIN_VARIANT=zephyr
-ENV ZEPHYR_SDK_INSTALL_DIR=/workdir/zephyr-sdk
-ENV ZEPHYR_BASE=/workdir/zephyr
-ENV PATH="${ZEPHYR_BASE}/scripts:${PATH}"
+# Launch into build environment with the passed arguments
+# Currently this is not supported in GitHub Actions
+# See https://github.com/actions/runner/issues/1964
+ENTRYPOINT [ "nrfutil", "toolchain-manager", "launch", "/bin/bash", "--", "/root/entry.sh" ]
+COPY ./entry.sh /root/entry.sh
